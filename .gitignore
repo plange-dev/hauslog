@@ -1,56 +1,22 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
-.DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+pytest-cache-files-*/
 
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
-.idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
-.dart_tool/
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
+# Bauergebnisse (PyInstaller, Installer, .deb)
 /build/
-/coverage/
+/dist/
 
-# Symbolication related
-app.*.symbols
+# Editoren
+.idea/
+*.iml
+.DS_Store
 
-# Obfuscation related
-app.*.map.json
-
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
-
-# Widget Preview related
-.widget_preview/
-
-# Hauslog
-# Werden von tool/web_dateien.sh passend zur drift-Version geladen
-/web/sqlite3.wasm
-/web/drift_worker.js
-# PocketBase-Daten und ausgelieferte Web-App gehören nicht ins Repo
+# PocketBase-Daten gehören nicht ins Repo
 /server/pb_data/
 /server/pb_public/

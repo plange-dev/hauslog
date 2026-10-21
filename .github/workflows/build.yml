@@ -2,13 +2,13 @@ name: Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, python-umbau]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
 env:
-  FLUTTER_VERSION: "3.47.7"
+  PYTHON_VERSION: "3.13"
   POCKETBASE_VERSION: "0.40.5"
 
 jobs:
@@ -16,16 +16,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: subosito/flutter-action@v2
+      - uses: actions/setup-python@v6
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
-      - run: flutter pub get
-      - name: Generierten Code prüfen
-        run: |
-          dart run build_runner build --delete-conflicting-outputs
-          git diff --exit-code lib/daten/datenbank.g.dart
-      - run: dart analyze --fatal-infos
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Qt-Systembibliotheken
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon0 libfontconfig1
+      - run: pip install -e ".[dev]"
+      - run: ruff check src tests && ruff format --check src tests
       - name: PocketBase für Sync-Tests starten
         run: |
           curl -fsSL -o pb.zip "https://github.com/pocketbase/pocketbase/releases/download/v${POCKETBASE_VERSION}/pocketbase_${POCKETBASE_VERSION}_linux_amd64.zip"
@@ -34,7 +31,7 @@ jobs:
           /tmp/pb/pocketbase superuser upsert ci@test.local ci-passwort-123 --dir /tmp/pb/data
           /tmp/pb/pocketbase serve --http 127.0.0.1:8090 --dir /tmp/pb/data --migrationsDir server/pb_migrations &
           for i in $(seq 30); do curl -fs http://127.0.0.1:8090/api/health && break; sleep 1; done
-      - run: flutter test
+      - run: pytest -v
         env:
           PB_URL: http://127.0.0.1:8090
           PB_ADMIN: ci@test.local
@@ -45,65 +42,64 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: subosito/flutter-action@v2
+      - uses: actions/setup-python@v6
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
-      - run: flutter build windows --release
-      - name: ZIP erstellen
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -e ".[dev]"
+      - run: pyinstaller --noconfirm --distpath build/dist --workpath build/work packaging/hauslog.spec
+      - name: Installer bauen
         shell: pwsh
         run: |
-          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([^+\s]+)').Matches[0].Groups[1].Value
-          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath "Hauslog-$version-windows-x64.zip"
+          $version = python -c "import hauslog; print(hauslog.__version__)"
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            choco install innosetup -y --no-progress
+            $env:PATH += ";${env:ProgramFiles(x86)}\Inno Setup 6"
+          }
+          iscc "/DAppVersion=$version" packaging\windows\hauslog.iss
+      - name: Installer testen (still installieren und starten)
+        shell: pwsh
+        run: |
+          $setup = Get-Item build\Hauslog-*-Setup.exe
+          Start-Process $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/CURRENTUSER" -Wait
+          $exe = "$env:LOCALAPPDATA\Programs\Hauslog\hauslog.exe"
+          if (-not (Test-Path $exe)) { throw "nicht installiert: $exe" }
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 8
+          if ($p.HasExited) { throw "Hauslog hat sich beendet (Exitcode $($p.ExitCode))" }
+          Stop-Process -Id $p.Id -Force
+          if (-not (Test-Path "$env:LOCALAPPDATA\Hauslog\hauslog.db")) { throw "keine Datenbank angelegt" }
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: Hauslog-*-windows-x64.zip
+          path: build/Hauslog-*-Setup.exe
 
-  linux:
+  ubuntu:
     needs: test
-    # Möglichst alte Basis, damit das AppImage auch auf älteren Systemen läuft.
+    # Älteste unterstützte Basis, damit das Paket auf 22.04 und neuer läuft.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5
-      - run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
-      - uses: subosito/flutter-action@v2
+      - uses: actions/setup-python@v6
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
-      - run: flutter build linux --release
-      - run: bash packaging/linux/appimage.sh
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux
-          path: build/Hauslog-*.AppImage
-
-  web:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
-      - run: flutter pub get
-      - run: bash tool/web_dateien.sh
-      - run: flutter build web --release
-      - name: ZIP erstellen
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -e ".[dev]"
+      - run: pyinstaller --noconfirm --distpath build/dist --workpath build/work packaging/hauslog.spec
+      - run: bash packaging/linux/deb_bauen.sh
+      - name: Paket testen (installieren und starten)
         run: |
-          version=$(awk '/^version:/{split($2, v, "+"); print v[1]}' pubspec.yaml)
-          (cd build/web && zip -qr "../../Hauslog-$version-web.zip" .)
+          sudo apt-get update
+          sudo apt-get install -y ./build/hauslog_*_amd64.deb xvfb
+          xvfb-run -a timeout 8 hauslog || test $? -eq 124
+          test -f ~/.local/share/hauslog/hauslog.db
       - uses: actions/upload-artifact@v4
         with:
-          name: web
-          path: Hauslog-*-web.zip
+          name: ubuntu
+          path: build/hauslog_*_amd64.deb
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, linux, web]
+    needs: [windows, ubuntu]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -114,5 +110,6 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            Hauslog-*
+            Hauslog-*-Setup.exe
+            hauslog_*_amd64.deb
           generate_release_notes: true

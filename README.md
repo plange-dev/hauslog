@@ -1,33 +1,55 @@
 # Hauslog
 
 Zählerstände erfassen und auswerten – Strom, Wasser, Gas, Wärme, Heizöl,
-PV-Einspeisung und beliebig viele weitere Zähler.
+PV-Einspeisung und beliebig viele weitere Zähler. Desktop-App für
+**Windows** (Installer) und **Ubuntu** (.deb), geschrieben in Python mit Qt
+(PySide6).
 
-- **Offline zuerst:** Alles wird lokal gespeichert (SQLite über Drift). Die App
+- **Offline zuerst:** Alles wird lokal in SQLite gespeichert. Die App
   funktioniert ohne Netz.
 - **Gemeinsam:** Mit einem Hauslog-Server (PocketBase auf NAS, Raspberry Pi
   oder in der Cloud) sehen alle Benutzer dieselben Daten. Offline erfasste
   Werte werden beim nächsten Kontakt abgeglichen; Änderungen anderer erscheinen
   sofort.
-- **Plattformen:** Windows, Linux (AppImage), Web.
 - **Auswertung:** Verbrauch je Ablesungszeitraum, Jahresverbrauch (anteilig
   über Jahresgrenzen), Ø pro Tag, Diagramm, Export als CSV und Excel.
 - **Umstieg:** Daten des alten Verbrauchsmanagers lassen sich unter
   *Einstellungen → Alte Verbrauchsmanager-Datenbank importieren* übernehmen.
 
+## Installation
+
+Die fertigen Pakete hängen an jedem
+[Release](https://github.com/plange-dev/hauslog/releases) (und als Artefakte an
+jedem Lauf unter *Actions*).
+
+**Windows 10/11:** `Hauslog-<version>-Setup.exe` ausführen. Keine
+Administratorrechte nötig; installiert nach
+`%LOCALAPPDATA%\Programs\Hauslog`, mit Eintrag im Startmenü.
+
+**Ubuntu 22.04 und neuer:**
+
+```bash
+sudo apt install ./hauslog_<version>_amd64.deb
+hauslog   # oder über das Anwendungsmenü
+```
+
+Daten liegen unter `%LOCALAPPDATA%\Hauslog` (Windows) bzw.
+`~/.local/share/hauslog` (Linux) und bleiben beim Deinstallieren erhalten.
+
 ## Aufbau
 
 ```
-lib/
-  daten/       Drift-Tabellen (zaehler, ablesungen) und Abfragen
-  logik/       Verbrauchsberechnung (reines Dart, getestet)
-  sync/        Abgleich mit PocketBase und automatische Steuerung
-  ui/          Oberfläche
-  export/      CSV/XLSX
-  import/      Übernahme aus dem alten Verbrauchsmanager
-  plattform/   Desktop- bzw. Web-spezifisches (Dateien speichern, Import)
-server/        PocketBase-Schema (pb_migrations), Docker, systemd
-packaging/     AppImage
+src/hauslog/
+  daten.py           lokale SQLite-Datenbank (zaehler, ablesungen)
+  verbrauch.py       Verbrauchsberechnung
+  pocketbase.py      kleiner PocketBase-Client inkl. Realtime
+  sync.py            Abgleich (reines Python, getestet gegen echten Server)
+  sync_steuerung.py  Abgleich im Hintergrund-Thread, Zeitsteuerung
+  export.py          CSV/XLSX
+  alt_import.py      Übernahme aus dem alten Verbrauchsmanager
+  ui/                Oberfläche (Qt Widgets)
+server/              PocketBase-Schema (pb_migrations), Docker, systemd
+packaging/           PyInstaller, Windows-Installer (Inno Setup), .deb
 ```
 
 ### Wie der Abgleich funktioniert
@@ -49,26 +71,29 @@ lokalen Änderung und sofort, wenn ein anderer Benutzer etwas ändert.
 
 ## Entwicklung
 
-Voraussetzungen: [Flutter](https://docs.flutter.dev/get-started/install)
-3.47 oder neuer. Für Windows-Builds zusätzlich Visual Studio 2022 mit
-„Desktopentwicklung mit C++“ und der Windows-Entwicklermodus
-(`start ms-settings:developers`). Für Linux-Builds:
-`clang cmake ninja-build pkg-config libgtk-3-dev`.
+Python 3.11 oder neuer.
 
 ```bash
-flutter pub get
-flutter run -d windows      # oder: -d linux
+python -m venv .venv
+# Windows: .venv\Scripts\activate    Linux: source .venv/bin/activate
+pip install -e ".[dev]"
 
-# Web: einmalig (und nach drift-Updates) die Worker-Dateien laden
-bash tool/web_dateien.sh
-flutter run -d chrome
-
-# Nach Änderungen an lib/daten/datenbank.dart
-dart run build_runner build
-
-# Tests (Sync-Tests laufen nur mit Server, siehe test/sync_test.dart)
-flutter test
+python -m hauslog          # App starten
+pytest                     # Tests (Sync-Tests nur mit Server, siehe tests/test_sync.py)
+ruff check src tests && ruff format src tests
 ```
+
+Pakete lokal bauen:
+
+```bash
+pyinstaller --noconfirm --distpath build/dist --workpath build/work packaging/hauslog.spec
+# Windows (Inno Setup 6 installiert):
+iscc /DAppVersion=0.3.0 packaging\windows\hauslog.iss
+# Ubuntu:
+bash packaging/linux/deb_bauen.sh
+```
+
+Das App-Symbol erzeugt `python tools/symbol_erzeugen.py`.
 
 ## Server einrichten
 
@@ -110,13 +135,6 @@ Benutzer legt der Admin an: `http://<server>:8090/_/` öffnen →
 In der App: *Einstellungen → Gemeinsame Daten*, Server-Adresse
 (z. B. `http://raspberrypi.local:8090`), E-Mail und Passwort eingeben.
 
-### Web-Version
-
-Den Inhalt von `Hauslog-…-web.zip` (oder `build/web`) nach
-`server/pb_public` bzw. `/opt/hauslog/pb_public` kopieren. Die Web-Version ist
-dann unter `http://<server>:8090/` erreichbar und nutzt automatisch denselben
-Server.
-
 ### Sicherung
 
 Alles liegt in `pb_data`. Dieses Verzeichnis regelmäßig sichern, oder in der
@@ -132,13 +150,8 @@ stellen.
 
 ## Releases
 
-Ein Tag `v*` (z. B. `git tag v0.2.0 && git push --tags`) baut per GitHub
-Actions automatisch:
-
-- `Hauslog-<version>-windows-x64.zip`
-- `Hauslog-<version>-x86_64.AppImage`
-- `Hauslog-<version>-web.zip`
-
-und hängt sie an ein GitHub-Release. Jeder Push auf `main` und jeder Pull
-Request baut und testet ebenfalls; die Dateien liegen dann als Artefakte am
-Workflow-Lauf.
+Ein Tag `v*` (z. B. `git tag v0.3.0 && git push --tags`) baut per GitHub
+Actions automatisch `Hauslog-<version>-Setup.exe` und
+`hauslog_<version>_amd64.deb`, testet beide (installieren und starten) und
+hängt sie an ein GitHub-Release. Die Version steht in
+`src/hauslog/__init__.py`.

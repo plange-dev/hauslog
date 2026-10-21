@@ -4,5 +4,6 @@ Name=Hauslog
 Comment=Zählerstände erfassen – offline und gemeinsam
 Exec=hauslog
 Icon=hauslog
+StartupWMClass=hauslog
 Categories=Office;Utility;
 Terminal=false

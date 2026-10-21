@@ -2,25 +2,18 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Hauslog (Windows)",
+      "name": "Hauslog starten",
+      "type": "debugpy",
       "request": "launch",
-      "type": "dart",
-      "program": "lib/main.dart",
-      "deviceId": "windows"
+      "module": "hauslog",
+      "justMyCode": true
     },
     {
-      "name": "Hauslog (Linux)",
+      "name": "Tests",
+      "type": "debugpy",
       "request": "launch",
-      "type": "dart",
-      "program": "lib/main.dart",
-      "deviceId": "linux"
-    },
-    {
-      "name": "Hauslog (Chrome)",
-      "request": "launch",
-      "type": "dart",
-      "program": "lib/main.dart",
-      "deviceId": "chrome"
+      "module": "pytest",
+      "justMyCode": false
     }
   ]
 }
