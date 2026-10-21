@@ -1,191 +1,144 @@
-# ⚡ Verbrauchsmanager
+# Hauslog
 
-Ein modernes Desktop-Programm zum Erfassen und Auswerten von
-**Strom (kWh)**, **Wasser (m³)** und **Gas (m³)** –
-gebaut mit **Rust** und **Qt 6 (QML)**.
+Zählerstände erfassen und auswerten – Strom, Wasser, Gas, Wärme, Heizöl,
+PV-Einspeisung und beliebig viele weitere Zähler.
 
----
+- **Offline zuerst:** Alles wird lokal gespeichert (SQLite über Drift). Die App
+  funktioniert ohne Netz.
+- **Gemeinsam:** Mit einem Hauslog-Server (PocketBase auf NAS, Raspberry Pi
+  oder in der Cloud) sehen alle Benutzer dieselben Daten. Offline erfasste
+  Werte werden beim nächsten Kontakt abgeglichen; Änderungen anderer erscheinen
+  sofort.
+- **Plattformen:** Windows, Linux (AppImage), Web.
+- **Auswertung:** Verbrauch je Ablesungszeitraum, Jahresverbrauch (anteilig
+  über Jahresgrenzen), Ø pro Tag, Diagramm, Export als CSV und Excel.
+- **Umstieg:** Daten des alten Verbrauchsmanagers lassen sich unter
+  *Einstellungen → Alte Verbrauchsmanager-Datenbank importieren* übernehmen.
 
-## 📦 Features
+## Aufbau
 
-| Funktion | Beschreibung |
-|---|---|
-| Verbrauch erfassen | Datum, Wert und optionale Notiz pro Eintrag |
-| Datenbank-Info | Vollständiger Pfad und Dateigröße werden angezeigt |
-| Neue DB erstellen | Beliebigen Speicherort per Dateidialog wählen |
-| DB öffnen | Vorhandene `.db`/`.sqlite`-Datei laden |
-| CSV-Export | Alle drei Verbrauchsarten in einer Datei |
-| XLSX-Export | Excel-Datei mit je einem Blatt pro Art + Summenzeile |
-| Statistik | Gesamtverbrauch und Anzahl Einträge je Art |
-| Löschen | Jeden Eintrag einzeln entfernen |
-
----
-
-## 🛠 Voraussetzungen
-
-### System-Pakete
-
-**Ubuntu / Debian:**
-```bash
-sudo apt update
-sudo apt install -y \
-    build-essential cmake ninja-build pkg-config \
-    qt6-base-dev qt6-declarative-dev qt6-tools-dev \
-    libgl1-mesa-dev libsqlite3-dev
+```
+lib/
+  daten/       Drift-Tabellen (zaehler, ablesungen) und Abfragen
+  logik/       Verbrauchsberechnung (reines Dart, getestet)
+  sync/        Abgleich mit PocketBase und automatische Steuerung
+  ui/          Oberfläche
+  export/      CSV/XLSX
+  import/      Übernahme aus dem alten Verbrauchsmanager
+  plattform/   Desktop- bzw. Web-spezifisches (Dateien speichern, Import)
+server/        PocketBase-Schema (pb_migrations), Docker, systemd
+packaging/     AppImage
 ```
 
-**Fedora / RHEL:**
-```bash
-sudo dnf install -y \
-    gcc cmake ninja-build pkg-config \
-    qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qttools \
-    mesa-libGL-devel sqlite-devel
-```
+### Wie der Abgleich funktioniert
 
-**macOS (Homebrew):**
-```bash
-brew install qt6 cmake ninja
-export PATH="/opt/homebrew/opt/qt/bin:$PATH"
-```
+Jeder Datensatz hat eine von der App vergebene ID, einen Änderungszeitpunkt
+`geaendert_am` und ein Lösch-Kennzeichen. Lokale Änderungen werden als
+„ungesendet“ markiert. Beim Abgleich:
 
-**Windows (MSVC + vcpkg):**
-```powershell
-# Qt 6 via Installer: https://www.qt.io/download-qt-installer
-# Dann:
-set Qt6_DIR=C:\Qt\6.x.x\msvc2022_64\lib\cmake\Qt6
-```
+1. Ungesendete Datensätze werden zum Server geschickt. Liegt dort eine neuere
+   Änderung, gewinnt diese.
+2. Alles, was sich auf dem Server seit dem letzten Abruf geändert hat, wird
+   geholt. Lokal neuere, noch nicht gesendete Änderungen bleiben erhalten.
 
-### Rust
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-rustup update stable
-```
+Bei Konflikten gewinnt also die zuletzt gemachte Änderung. Voraussetzung ist,
+dass die Uhren der Geräte ungefähr stimmen.
 
----
+Abgeglichen wird beim Start, alle 2 Minuten, wenige Sekunden nach jeder
+lokalen Änderung und sofort, wenn ein anderer Benutzer etwas ändert.
 
-## 🚀 Kompilieren und Starten
+## Entwicklung
+
+Voraussetzungen: [Flutter](https://docs.flutter.dev/get-started/install)
+3.47 oder neuer. Für Windows-Builds zusätzlich Visual Studio 2022 mit
+„Desktopentwicklung mit C++“ und der Windows-Entwicklermodus
+(`start ms-settings:developers`). Für Linux-Builds:
+`clang cmake ninja-build pkg-config libgtk-3-dev`.
 
 ```bash
-# 1. Repository klonen / Ordner entpacken
-cd verbrauchsmanager
+flutter pub get
+flutter run -d windows      # oder: -d linux
 
-# 2. Debug-Build (schneller)
-cargo run
+# Web: einmalig (und nach drift-Updates) die Worker-Dateien laden
+bash tool/web_dateien.sh
+flutter run -d chrome
 
-# 3. Release-Build (optimiert)
-cargo build --release
-./target/release/verbrauchsmanager
+# Nach Änderungen an lib/daten/datenbank.dart
+dart run build_runner build
+
+# Tests (Sync-Tests laufen nur mit Server, siehe test/sync_test.dart)
+flutter test
 ```
 
----
+## Server einrichten
 
-## 📁 Datenbankpfad
+Der Server ist [PocketBase](https://pocketbase.io) – ein einzelnes Programm
+mit eingebauter Datenbank, Benutzerverwaltung und Admin-Oberfläche. Das
+Hauslog-Schema liegt in `server/pb_migrations` und wird beim Start automatisch
+angelegt.
 
-Die SQLite-Datenbank wird standardmäßig hier gespeichert:
+### Mit Docker (NAS, Raspberry Pi, Server)
 
-| Betriebssystem | Pfad |
-|---|---|
-| **Linux** | `~/.local/share/verbrauchsmanager/verbrauch.db` |
-| **macOS** | `~/Library/Application Support/verbrauchsmanager/verbrauch.db` |
-| **Windows** | `%APPDATA%\Local\verbrauchsmanager\verbrauch.db` |
-
-Der Pfad wird in der Statusleiste unten und im **Datenbank-Tab** angezeigt.
-Über *Neue Datenbank erstellen* kann ein beliebiger anderer Ort gewählt werden.
-
----
-
-## 📊 Datenbankschema
-
-```sql
--- Tabelle für Strom
-CREATE TABLE strom (
-    id    INTEGER PRIMARY KEY AUTOINCREMENT,
-    datum TEXT    NOT NULL,          -- Format: "YYYY-MM-DD"
-    wert  REAL    NOT NULL CHECK(wert >= 0),
-    notiz TEXT    NOT NULL DEFAULT ''
-);
-
--- Identisch für: wasser, gas
-CREATE INDEX idx_strom_datum ON strom(datum DESC);
-```
-
----
-
-## 📄 CSV-Export (Beispiel)
-
-```
-Art,Datum,Wert,Einheit,Notiz
-Strom,2024-01-15,312.5000,kWh,Hauptzähler
-Strom,2024-02-15,287.2300,kWh,
-Wasser,2024-01-15,4.8500,m³,Keller-Zähler
-Gas,2024-01-15,123.4000,m³,
-```
-
----
-
-## 📊 XLSX-Export
-
-Die Excel-Datei enthält **drei Tabellenblätter**:
-
-- `Strom (kWh)` – alle Stromeinträge + Gesamtsumme
-- `Wasser (m³)` – alle Wassereinträge + Gesamtsumme
-- `Gas (m³)` – alle Gaseinträge + Gesamtsumme
-
----
-
-## 🗂 Projektstruktur
-
-```
-verbrauchsmanager/
-├── Cargo.toml          # Abhängigkeiten & Build-Konfiguration
-├── build.rs            # Qt6-Build-Skript (cxx-qt-build)
-├── src/
-│   ├── main.rs         # Einstiegspunkt, Qt-App-Initialisierung
-│   ├── bridge.rs       # cxx-qt-Bridge: Qt ↔ Rust Schnittstelle
-│   └── datenbank.rs    # SQLite-Operationen, CSV/XLSX-Export
-└── qml/
-    ├── main.qml        # Hauptfenster, TabBar, Layout
-    ├── EingabeSeite.qml   # Eingabeformular + Tabelle (3× verwendet)
-    └── DatenbankSeite.qml # DB-Verwaltung, Statistik, Export
-```
-
----
-
-## 📦 Verwendete Bibliotheken
-
-| Crate | Zweck |
-|---|---|
-| `cxx-qt` | Rust ↔ Qt6 QObject-Bindings |
-| `cxx-qt-lib` | Qt-Typen (QString, QStringList …) |
-| `rusqlite` | SQLite (statisch gelinkt, kein extra sqlite3 nötig) |
-| `csv` | CSV-Export |
-| `xlsxwriter` | Excel-XLSX-Export |
-| `chrono` | Datum/Zeit-Validierung |
-| `dirs` | Betriebssystem-spezifische Datenpfade |
-| `anyhow` | Fehlerbehandlung |
-
----
-
-## 🐛 Häufige Fehler
-
-**`Qt6 not found`**
 ```bash
-export CMAKE_PREFIX_PATH=/path/to/Qt/6.x.x/gcc_64
+cd server
+docker compose up -d --build
+docker compose exec hauslog /pb/pocketbase superuser upsert admin@example.com EIN-SICHERES-PASSWORT --dir=/pb/pb_data
 ```
 
-**`libGL not found`** (Linux)
+### Ohne Docker (z. B. Raspberry Pi OS)
+
+PocketBase für die passende Architektur von
+<https://github.com/pocketbase/pocketbase/releases> laden (Pi 3/4/5 mit 64-Bit:
+`linux_arm64`), dann:
+
 ```bash
-sudo apt install libgl1-mesa-dev
+sudo useradd --system --home /opt/hauslog hauslog
+sudo mkdir -p /opt/hauslog && sudo unzip pocketbase_*_linux_arm64.zip pocketbase -d /opt/hauslog
+sudo cp -r server/pb_migrations /opt/hauslog/
+sudo chown -R hauslog:hauslog /opt/hauslog
+sudo -u hauslog /opt/hauslog/pocketbase superuser upsert admin@example.com EIN-SICHERES-PASSWORT --dir=/opt/hauslog/pb_data
+sudo cp server/hauslog-server.service /etc/systemd/system/
+sudo systemctl enable --now hauslog-server
 ```
 
-**Fenster öffnet sich nicht / leer**
-- Qt Quick Controls 2 Style setzen:
-```bash
-QT_QUICK_CONTROLS_STYLE=Fusion ./verbrauchsmanager
-```
+### Benutzer anlegen
 
----
+Selbstregistrierung ist gesperrt, weil jeder Benutzer alle Daten sieht.
+Benutzer legt der Admin an: `http://<server>:8090/_/` öffnen →
+*Collections → users → New record* (E-Mail und Passwort).
 
-## 📜 Lizenz
+In der App: *Einstellungen → Gemeinsame Daten*, Server-Adresse
+(z. B. `http://raspberrypi.local:8090`), E-Mail und Passwort eingeben.
 
-MIT License – frei verwendbar und modifizierbar.
+### Web-Version
+
+Den Inhalt von `Hauslog-…-web.zip` (oder `build/web`) nach
+`server/pb_public` bzw. `/opt/hauslog/pb_public` kopieren. Die Web-Version ist
+dann unter `http://<server>:8090/` erreichbar und nutzt automatisch denselben
+Server.
+
+### Sicherung
+
+Alles liegt in `pb_data`. Dieses Verzeichnis regelmäßig sichern, oder in der
+PocketBase-Oberfläche unter *Settings → Backups* automatische Sicherungen
+einrichten.
+
+### Zugriff von unterwegs
+
+Im Heimnetz genügt `http://`. Für Zugriff aus dem Internet einen Reverse-Proxy
+mit HTTPS (z. B. Caddy, oder Reverse Proxy des NAS) oder ein VPN wie
+Tailscale/WireGuard verwenden. PocketBase **nicht** ohne HTTPS ins Internet
+stellen.
+
+## Releases
+
+Ein Tag `v*` (z. B. `git tag v0.2.0 && git push --tags`) baut per GitHub
+Actions automatisch:
+
+- `Hauslog-<version>-windows-x64.zip`
+- `Hauslog-<version>-x86_64.AppImage`
+- `Hauslog-<version>-web.zip`
+
+und hängt sie an ein GitHub-Release. Jeder Push auf `main` und jeder Pull
+Request baut und testet ebenfalls; die Dateien liegen dann als Artefakte am
+Workflow-Lauf.

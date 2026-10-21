@@ -1,0 +1,20 @@
+# systemd-Dienst für den Hauslog-Server ohne Docker (z. B. Raspberry Pi OS).
+# Annahme: PocketBase und pb_migrations liegen in /opt/hauslog.
+#   sudo cp hauslog-server.service /etc/systemd/system/
+#   sudo systemctl enable --now hauslog-server
+[Unit]
+Description=Hauslog-Server (PocketBase)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hauslog
+Group=hauslog
+WorkingDirectory=/opt/hauslog
+ExecStart=/opt/hauslog/pocketbase serve --http=0.0.0.0:8090 --dir=/opt/hauslog/pb_data --migrationsDir=/opt/hauslog/pb_migrations --publicDir=/opt/hauslog/pb_public
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

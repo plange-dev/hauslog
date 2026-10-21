@@ -1,0 +1,12 @@
+services:
+  hauslog:
+    build: .
+    container_name: hauslog-server
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    volumes:
+      # Alle Daten inkl. Benutzer – dieses Verzeichnis sichern!
+      - ./pb_data:/pb/pb_data
+      # Optional: Inhalt von build/web hier hinein kopieren
+      - ./pb_public:/pb/pb_public

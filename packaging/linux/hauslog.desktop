@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Hauslog
+Comment=Zählerstände erfassen – offline und gemeinsam
+Exec=hauslog
+Icon=hauslog
+Categories=Office;Utility;
+Terminal=false
